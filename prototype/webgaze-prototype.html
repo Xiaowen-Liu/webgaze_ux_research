@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGaze — Eye Tracking Prototype</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .screen {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .screen.hidden { display: none; }
+
+    /* ---- Welcome ---- */
+    #welcome-screen { background: #0f1117; gap: 20px; padding: 48px; text-align: center; }
+    h1 { font-size: 2rem; font-weight: 700; color: #fff; }
+    .subtitle { color: #94a3b8; font-size: 1rem; max-width: 480px; line-height: 1.6; }
+
+    .btn { padding: 12px 28px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .btn-primary { background: #6366f1; color: white; }
+    .btn-primary:hover { background: #4f46e5; transform: translateY(-1px); }
+    .btn-secondary { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    .btn-secondary:hover { background: #263348; color: #e2e8f0; }
+
+    .features { display: flex; gap: 16px; margin: 8px 0; }
+    .feature { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; text-align: left; width: 160px; }
+    .feature-icon { font-size: 24px; margin-bottom: 8px; }
+    .feature-title { font-size: 13px; font-weight: 600; color: #e2e8f0; margin-bottom: 4px; }
+    .feature-desc { font-size: 11px; color: #64748b; line-height: 1.4; }
+
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: #0f172a; color: #6366f1; border: 1px solid #1e3a5f; }
+
+    /* ---- Calibration ---- */
+    #calibration-screen { background: #0f1117; }
+    #calibration-header { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); text-align: center; }
+    #calibration-header h2 { font-size: 1.1rem; font-weight: 600; }
+    #calibration-header p { font-size: 13px; color: #64748b; margin-top: 4px; }
+    #calibration-progress { margin-top: 12px; font-size: 12px; color: #94a3b8; }
+
+    .cal-dot {
+      position: absolute;
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: #334155;
+      transform: translate(-50%, -50%);
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .cal-dot-inner { width: 10px; height: 10px; border-radius: 50%; background: #64748b; }
+    .cal-dot.active { background: #f59e0b; animation: pulse 1s infinite; }
+    .cal-dot.active .cal-dot-inner { background: white; }
+    .cal-dot.done { background: #22c55e; }
+    .cal-dot.done .cal-dot-inner { background: white; }
+    .cal-dot-count { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #64748b; white-space: nowrap; }
+    .cal-dot.active .cal-dot-count { color: #f59e0b; }
+
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(245,158,11,0.7); }
+      70%  { box-shadow: 0 0 0 12px rgba(245,158,11,0); }
+      100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
+    }
+
+    /* ---- Accuracy check ---- */
+    #accuracy-screen { background: #0f1117; gap: 16px; }
+    #accuracy-screen h2 { font-size: 1.2rem; font-weight: 600; color: #e2e8f0; }
+    #accuracy-screen p { font-size: 13px; color: #64748b; text-align: center; max-width: 360px; line-height: 1.6; }
+    #accuracy-dot { width: 22px; height: 22px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 6px rgba(34,197,94,0.2); margin: 8px auto; }
+
+    /* ---- Tracking ---- */
+    #tracking-screen { background: #f8fafc; color: #1e293b; align-items: stretch; justify-content: flex-start; }
+
+    #toolbar {
+      background: #1e293b; padding: 10px 20px;
+      display: flex; align-items: center; gap: 10px;
+      flex-shrink: 0; z-index: 100; width: 100%;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: blink 1.5s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .toolbar-title { font-size: 13px; font-weight: 600; color: #e2e8f0; margin-right: 4px; }
+    .toolbar-stat { font-size: 11px; color: #64748b; margin-left: auto; }
+    .toolbar-stat span { color: #94a3b8; font-weight: 600; }
+
+    #content-area { flex: 1; overflow-y: auto; padding: 40px; position: relative; }
+    .test-page { max-width: 760px; margin: 0 auto; }
+    .test-page h2 { font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-bottom: 8px; }
+    .hero-text { font-size: 1rem; color: #475569; line-height: 1.7; margin-bottom: 24px; }
+
+    .card-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 32px; }
+    .card { background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; cursor: pointer; transition: all 0.15s; }
+    .card:hover { border-color: #6366f1; box-shadow: 0 4px 12px rgba(99,102,241,0.1); }
+    .card-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #6366f1; margin-bottom: 8px; }
+    .card h3 { font-size: 14px; font-weight: 600; color: #0f172a; margin-bottom: 6px; }
+    .card p { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+    .cta-row { display: flex; gap: 12px; margin-bottom: 32px; }
+    .cta-primary { padding: 12px 24px; background: #6366f1; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .cta-secondary { padding: 12px 24px; background: white; color: #475569; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+
+    /* ---- Gaze overlay ---- */
+    #gaze-canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 999; }
+    #gaze-dot {
+      position: fixed; width: 16px; height: 16px; border-radius: 50%;
+      background: rgba(99,102,241,0.85); border: 2px solid white;
+      transform: translate(-50%,-50%); pointer-events: none; z-index: 1000;
+      box-shadow: 0 0 8px rgba(99,102,241,0.5); display: none;
+    }
+
+    /* ---- Dwell panel ---- */
+    #dwell-panel {
+      position: fixed; bottom: 20px; right: 20px;
+      background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+      padding: 16px; width: 220px; z-index: 200;
+    }
+    #dwell-panel h4 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 12px; }
+    .dwell-item { display: flex; align-items: center; margin-bottom: 8px; gap: 6px; }
+    .dwell-label { font-size: 12px; color: #94a3b8; width: 76px; flex-shrink: 0; }
+    .dwell-bar-wrap { flex: 1; height: 4px; background: #0f172a; border-radius: 2px; }
+    .dwell-bar { height: 4px; background: #6366f1; border-radius: 2px; transition: width 0.3s; }
+    .dwell-time { font-size: 11px; color: #e2e8f0; font-weight: 600; width: 30px; text-align: right; }
+    .dwell-tip { font-size: 10px; color: #475569; margin-top: 10px; padding-top: 10px; border-top: 1px solid #334155; line-height: 1.4; }
+
+    /* ---- Notification ---- */
+    #notification {
+      position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 10px 20px; font-size: 13px; color: #e2e8f0;
+      z-index: 2000; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    }
+    #notification.show { opacity: 1; }
+
+    /* Keep webgazer video small & unobtrusive */
+    #webgazerVideoContainer { opacity: 0.55 !important; }
+  </style>
+</head>
+<body>
+
+<div id="notification"></div>
+<div id="gaze-dot"></div>
+<canvas id="gaze-canvas"></canvas>
+
+<!-- ================================================ WELCOME -->
+<div id="welcome-screen" class="screen">
+  <div class="tag">Prototype v0.1</div>
+  <h1>👁 WebGaze</h1>
+  <p class="subtitle">Webcam-based eye tracking for user research. No hardware required — your browser camera does the work.</p>
+  <div class="features">
+    <div class="feature">
+      <div class="feature-icon">🎯</div>
+      <div class="feature-title">9-Point Calibration</div>
+      <div class="feature-desc">Click each dot to train the gaze model to your eyes</div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🔥</div>
+      <div class="feature-title">Live Heatmap</div>
+      <div class="feature-desc">See where attention concentrates in real time</div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">📊</div>
+      <div class="feature-title">AOI Dwell Time</div>
+      <div class="feature-desc">Time-on-zone stats for key page regions</div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">💾</div>
+      <div class="feature-title">JSON Export</div>
+      <div class="feature-desc">Raw gaze stream for offline analysis</div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:#475569;max-width:400px;">Your camera is processed entirely in-browser. No video leaves your device.</p>
+  <button class="btn btn-primary" onclick="startCalibration()">Allow Camera & Begin →</button>
+</div>
+
+<!-- ================================================ CALIBRATION -->
+<div id="calibration-screen" class="screen hidden">
+  <div id="calibration-header">
+    <h2>Click each dot 5 times</h2>
+    <p>Look directly at the highlighted dot, then click it. Keep your head still.</p>
+    <div id="calibration-progress">0 / 9 dots complete</div>
+  </div>
+</div>
+
+<!-- ================================================ ACCURACY CHECK -->
+<div id="accuracy-screen" class="screen hidden">
+  <h2>Calibration complete ✓</h2>
+  <p>Look at the green dot below.<br>The blue gaze dot should follow your eyes.</p>
+  <div id="accuracy-dot"></div>
+  <button class="btn btn-primary" onclick="startTracking()">Start Tracking Session →</button>
+  <button class="btn btn-secondary" style="margin-top:8px" onclick="restartCalibration()">Recalibrate</button>
+</div>
+
+<!-- ================================================ TRACKING -->
+<div id="tracking-screen" class="screen hidden">
+  <div id="toolbar">
+    <div class="status-dot"></div>
+    <span class="toolbar-title">WebGaze</span>
+    <button class="btn btn-secondary" id="heatmap-btn" onclick="toggleHeatmap()" style="font-size:12px;padding:6px 14px;">Show Heatmap</button>
+    <button class="btn btn-secondary" onclick="clearHeatmap()" style="font-size:12px;padding:6px 14px;">Clear</button>
+    <button class="btn btn-secondary" onclick="exportData()" style="font-size:12px;padding:6px 14px;">Export JSON</button>
+    <button class="btn btn-secondary" onclick="restartCalibration()" style="font-size:12px;padding:6px 14px;">Recalibrate</button>
+    <div class="toolbar-stat">Points: <span id="point-count">0</span> &nbsp;|&nbsp; Session: <span id="session-time">0s</span></div>
+  </div>
+
+  <div id="content-area">
+    <div class="test-page">
+      <h2 id="aoi-headline">Understand your users. Instantly.</h2>
+      <p class="hero-text">
+        WebGaze turns any webcam into a gaze tracker, giving researchers real-time visibility into where users look — without expensive hardware. Built for fast, iterative UX research.
+      </p>
+
+      <div class="cta-row" id="aoi-cta">
+        <button class="cta-primary">Get Started Free</button>
+        <button class="cta-secondary">View Demo</button>
+      </div>
+
+      <div class="card-grid" id="aoi-cards">
+        <div class="card">
+          <div class="card-label">Feature</div>
+          <h3>Real-time Heatmaps</h3>
+          <p>Visualize attention density across your UI as users interact with it.</p>
+        </div>
+        <div class="card">
+          <div class="card-label">Feature</div>
+          <h3>Fixation Detection</h3>
+          <p>Automatically identify when a user is focused vs. scanning rapidly.</p>
+        </div>
+        <div class="card">
+          <div class="card-label">Feature</div>
+          <h3>AOI Analytics</h3>
+          <p>Define regions of interest and get dwell-time stats automatically.</p>
+        </div>
+      </div>
+
+      <p class="hero-text">
+        Research shows users form first impressions within 50ms of landing on a page. With WebGaze, you can measure those critical moments and optimize accordingly. Works in any modern browser — no plugins required.
+      </p>
+
+      <div class="card-grid">
+        <div class="card">
+          <div class="card-label">Accuracy</div>
+          <h3>~50–100px Error</h3>
+          <p>Sufficient for button-level and section-level analysis in most layouts.</p>
+        </div>
+        <div class="card">
+          <div class="card-label">Performance</div>
+          <h3>30fps Processing</h3>
+          <p>Runs on-device via WebAssembly — no server round-trips.</p>
+        </div>
+        <div class="card">
+          <div class="card-label">Privacy</div>
+          <h3>100% Client-side</h3>
+          <p>No video data ever leaves the browser. Only coordinates are recorded.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dwell-panel">
+    <h4>AOI Dwell Time</h4>
+    <div class="dwell-item">
+      <span class="dwell-label">Headline</span>
+      <div class="dwell-bar-wrap"><div class="dwell-bar" id="dwell-headline" style="width:0%"></div></div>
+      <span class="dwell-time" id="dwell-t-headline">0s</span>
+    </div>
+    <div class="dwell-item">
+      <span class="dwell-label">CTA Buttons</span>
+      <div class="dwell-bar-wrap"><div class="dwell-bar" id="dwell-cta" style="width:0%"></div></div>
+      <span class="dwell-time" id="dwell-t-cta">0s</span>
+    </div>
+    <div class="dwell-item">
+      <span class="dwell-label">Feature Cards</span>
+      <div class="dwell-bar-wrap"><div class="dwell-bar" id="dwell-cards" style="width:0%"></div></div>
+      <span class="dwell-time" id="dwell-t-cards">0s</span>
+    </div>
+    <p class="dwell-tip">Tip: sit ~60cm from screen for best accuracy.</p>
+  </div>
+</div>
+
+<!-- ================================================ SCRIPTS -->
+<script src="https://unpkg.com/webgazer@2.1.0/dist/webgazer.js"></script>
+<script>
+// ─────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────
+const STATE = {
+  phase: 'welcome',
+  gazePoints: [],
+  showHeatmap: false,
+  trackingStartTime: null,
+  dwellTimes: { headline: 0, cta: 0, cards: 0 },
+  lastGazeTime: null,
+  currentAOI: null,
+  pointCount: 0,
+};
+
+// Calibration
+const CAL = {
+  dots: [],
+  currentDot: 0,
+  CLICKS_NEEDED: 5,
+};
+
+// Canvas
+const canvas = document.getElementById('gaze-canvas');
+const ctx = canvas.getContext('2d');
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  if (STATE.showHeatmap) redrawHeatmap();
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// EMA smoothing params
+let smoothX = null, smoothY = null;
+const ALPHA = 0.22;
+
+// ─────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+}
+
+let notifTimer = null;
+function notify(msg, ms = 2500) {
+  const el = document.getElementById('notification');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+// ─────────────────────────────────────────────────────
+// Calibration
+// ─────────────────────────────────────────────────────
+// 9 positions as [x%, y%] with padding from edges
+const CAL_POSITIONS = [
+  [5,5],[50,5],[95,5],
+  [5,50],[50,50],[95,50],
+  [5,95],[50,95],[95,95],
+];
+const PAD = 50; // px from edges
+
+function startCalibration() {
+  showScreen('calibration-screen');
+  STATE.phase = 'calibrating';
+  smoothX = null; smoothY = null;
+
+  webgazer
+    .setGazeListener(() => {})
+    .showPredictionPoints(false)
+    .showVideo(true)
+    .showFaceOverlay(false)
+    .showFaceFeedbackBox(false)
+    .begin()
+    .catch(err => notify('Camera error: ' + err.message));
+
+  buildCalDots();
+}
+
+function buildCalDots() {
+  // Clean up previous dots
+  CAL.dots.forEach(d => d.el && d.el.remove());
+  CAL.dots = [];
+  CAL.currentDot = 0;
+
+  const screen = document.getElementById('calibration-screen');
+  const W = window.innerWidth, H = window.innerHeight;
+
+  CAL_POSITIONS.forEach(([xp, yp], i) => {
+    const x = PAD + (xp / 100) * (W - 2 * PAD);
+    const y = PAD + (yp / 100) * (H - 2 * PAD);
+
+    const el = document.createElement('div');
+    el.className = 'cal-dot' + (i === 0 ? ' active' : '');
+    el.style.left = x + 'px';
+    el.style.top  = y + 'px';
+    el.innerHTML = '<div class="cal-dot-inner"></div><div class="cal-dot-count">0/5</div>';
+    el.addEventListener('click', () => onCalDotClick(i, x, y));
+    screen.appendChild(el);
+
+    CAL.dots.push({ x, y, el, clicks: 0 });
+  });
+
+  updateCalProgress();
+}
+
+function onCalDotClick(i, x, y) {
+  const dot = CAL.dots[i];
+  if (i !== CAL.currentDot) { notify('Complete the highlighted dot first'); return; }
+  if (dot.clicks >= CAL.CLICKS_NEEDED) return;
+
+  webgazer.recordScreenPosition(x, y, 'click');
+  dot.clicks++;
+  dot.el.querySelector('.cal-dot-count').textContent = `${dot.clicks}/5`;
+
+  if (dot.clicks >= CAL.CLICKS_NEEDED) {
+    dot.el.classList.remove('active');
+    dot.el.classList.add('done');
+    CAL.currentDot++;
+
+    if (CAL.currentDot < CAL.dots.length) {
+      CAL.dots[CAL.currentDot].el.classList.add('active');
+    } else {
+      setTimeout(finishCalibration, 400);
+    }
+  }
+  updateCalProgress();
+}
+
+function updateCalProgress() {
+  const done = CAL.dots.filter(d => d.clicks >= CAL.CLICKS_NEEDED).length;
+  document.getElementById('calibration-progress').textContent = `${done} / 9 dots complete`;
+}
+
+function finishCalibration() {
+  showScreen('accuracy-screen');
+  STATE.phase = 'accuracy';
+  webgazer.setGazeListener(onGaze);
+  document.getElementById('gaze-dot').style.display = 'block';
+  notify('Calibration complete ✓');
+}
+
+function restartCalibration() {
+  webgazer.clearData();
+  document.getElementById('gaze-dot').style.display = 'none';
+  STATE.gazePoints = [];
+  STATE.pointCount = 0;
+  clearCanvas();
+  smoothX = null; smoothY = null;
+  showScreen('calibration-screen');
+  STATE.phase = 'calibrating';
+  buildCalDots();
+}
+
+// ─────────────────────────────────────────────────────
+// Gaze listener & smoothing
+// ─────────────────────────────────────────────────────
+function onGaze(data) {
+  if (!data) return;
+
+  // EMA smooth
+  if (smoothX === null) { smoothX = data.x; smoothY = data.y; }
+  smoothX = ALPHA * data.x + (1 - ALPHA) * smoothX;
+  smoothY = ALPHA * data.y + (1 - ALPHA) * smoothY;
+  const x = smoothX, y = smoothY;
+
+  // Move dot
+  const dot = document.getElementById('gaze-dot');
+  dot.style.left = x + 'px';
+  dot.style.top  = y + 'px';
+
+  if (STATE.phase !== 'tracking') return;
+
+  // Record
+  STATE.gazePoints.push({ x: Math.round(x), y: Math.round(y), t: Date.now() });
+  STATE.pointCount++;
+
+  // Heatmap paint
+  if (STATE.showHeatmap) paintHeatPoint(x, y);
+
+  // AOI dwell
+  tickAOIDwell(x, y);
+}
+
+// ─────────────────────────────────────────────────────
+// Tracking session
+// ─────────────────────────────────────────────────────
+function startTracking() {
+  showScreen('tracking-screen');
+  STATE.phase = 'tracking';
+  STATE.trackingStartTime = Date.now();
+  STATE.gazePoints = [];
+  STATE.pointCount = 0;
+  STATE.dwellTimes = { headline: 0, cta: 0, cards: 0 };
+  STATE.lastGazeTime = null;
+
+  webgazer.setGazeListener(onGaze);
+  document.getElementById('gaze-dot').style.display = 'block';
+
+  setInterval(updateStatsUI, 500);
+  setInterval(updateDwellUI, 300);
+}
+
+// ─────────────────────────────────────────────────────
+// Heatmap
+// ─────────────────────────────────────────────────────
+function paintHeatPoint(x, y) {
+  const r = 44;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0,   'rgba(255,50,50,0.13)');
+  g.addColorStop(0.4, 'rgba(255,140,0,0.07)');
+  g.addColorStop(1,   'rgba(255,220,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function redrawHeatmap() {
+  clearCanvas();
+  STATE.gazePoints.forEach(p => paintHeatPoint(p.x, p.y));
+}
+
+function clearCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function toggleHeatmap() {
+  STATE.showHeatmap = !STATE.showHeatmap;
+  document.getElementById('heatmap-btn').textContent =
+    STATE.showHeatmap ? 'Hide Heatmap' : 'Show Heatmap';
+  if (STATE.showHeatmap) redrawHeatmap(); else clearCanvas();
+}
+
+function clearHeatmap() {
+  STATE.gazePoints = [];
+  STATE.pointCount = 0;
+  clearCanvas();
+  notify('Heatmap cleared');
+}
+
+// ─────────────────────────────────────────────────────
+// AOI dwell time
+// ─────────────────────────────────────────────────────
+const AOI_MAP = {
+  headline: 'aoi-headline',
+  cta:      'aoi-cta',
+  cards:    'aoi-cards',
+};
+
+function tickAOIDwell(x, y) {
+  const now = Date.now();
+  let hit = null;
+
+  for (const [name, id] of Object.entries(AOI_MAP)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      hit = name; break;
+    }
+  }
+
+  if (hit && STATE.lastGazeTime) {
+    const delta = now - STATE.lastGazeTime;
+    if (delta < 150) STATE.dwellTimes[hit] += delta; // ignore saccades/blinks
+  }
+
+  STATE.lastGazeTime = now;
+  STATE.currentAOI = hit;
+}
+
+function updateDwellUI() {
+  const times = STATE.dwellTimes;
+  const maxT = Math.max(...Object.values(times), 1000);
+  for (const name of Object.keys(AOI_MAP)) {
+    const t = times[name] || 0;
+    const bar = document.getElementById(`dwell-${name}`);
+    const lbl = document.getElementById(`dwell-t-${name}`);
+    if (bar) bar.style.width = Math.min(100, (t / maxT) * 100) + '%';
+    if (lbl) lbl.textContent = (t / 1000).toFixed(1) + 's';
+  }
+}
+
+// ─────────────────────────────────────────────────────
+// Stats bar
+// ─────────────────────────────────────────────────────
+function updateStatsUI() {
+  if (STATE.phase !== 'tracking') return;
+  document.getElementById('point-count').textContent = STATE.pointCount;
+  const s = Math.floor((Date.now() - STATE.trackingStartTime) / 1000);
+  document.getElementById('session-time').textContent = s + 's';
+}
+
+// ─────────────────────────────────────────────────────
+// Export
+// ─────────────────────────────────────────────────────
+function exportData() {
+  const payload = {
+    session: {
+      startTime: new Date(STATE.trackingStartTime).toISOString(),
+      durationMs: Date.now() - STATE.trackingStartTime,
+      pointCount: STATE.gazePoints.length,
+    },
+    dwellTimes: STATE.dwellTimes,
+    gazePoints: STATE.gazePoints,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `gaze-session-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  notify('Session exported ✓');
+}
+
+// Cleanup on unload
+window.addEventListener('beforeunload', () => { try { webgazer.end(); } catch(e){} });
+</script>
+</body>
+</html>
