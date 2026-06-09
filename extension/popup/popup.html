@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGaze</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <img src="../icons/icon48.png" alt="" width="24" height="24" />
+      <span>WebGaze</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Status pill -->
+    <div class="status-row">
+      <div id="status-pill" class="pill idle">
+        <span class="pill-dot"></span>
+        <span id="status-text">Idle</span>
+      </div>
+      <div id="session-time" class="session-time" style="display:none">0:00</div>
+    </div>
+
+    <!-- Stats (hidden until tracking) -->
+    <div id="stats" class="stats" style="display:none">
+      <div class="stat">
+        <span id="stat-points" class="stat-value">0</span>
+        <span class="stat-label">Gaze points</span>
+      </div>
+      <div class="stat">
+        <span id="stat-pages" class="stat-value">0</span>
+        <span class="stat-label">Pages tracked</span>
+      </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="actions">
+      <button id="btn-start" class="btn btn-primary">Start Session</button>
+      <button id="btn-recal" class="btn btn-secondary" style="display:none">Recalibrate</button>
+      <button id="btn-stop"  class="btn btn-danger"   style="display:none">Stop &amp; Export</button>
+    </div>
+
+    <!-- AOI section (collapsible) -->
+    <details id="aoi-section" class="section">
+      <summary>Areas of Interest (AOIs)</summary>
+      <p class="hint">Define rectangular AOIs to track dwell time per region.</p>
+      <div id="aoi-list" class="aoi-list">
+        <p class="empty-hint">No AOIs defined.</p>
+      </div>
+      <button id="btn-add-aoi" class="btn btn-sm">+ Add AOI</button>
+    </details>
+
+    <!-- Export section (shown after stop) -->
+    <div id="export-section" class="section" style="display:none">
+      <h3>Last Session</h3>
+      <div id="export-summary" class="export-summary"></div>
+      <button id="btn-download" class="btn btn-primary btn-full">Download JSON</button>
+    </div>
+  </main>
+
+  <footer>
+    <span id="footer-session-id" class="footer-dim"></span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
