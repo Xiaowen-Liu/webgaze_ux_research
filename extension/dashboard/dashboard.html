@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGaze Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="logo">WebGaze</span>
+      <span class="topbar-sep">|</span>
+      <span id="session-label" class="session-label">No session loaded</span>
+    </div>
+    <div class="topbar-right">
+      <button id="btn-load-current" class="btn btn-secondary">Load Current Session</button>
+      <label class="btn btn-secondary" id="btn-import-label">
+        Import JSON
+        <input id="file-input" type="file" accept=".json" style="display:none" />
+      </label>
+    </div>
+  </header>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="empty-state">
+    <div class="empty-icon">👁</div>
+    <h2>No session loaded</h2>
+    <p>Click <strong>Load Current Session</strong> to view the active session,<br>or <strong>Import JSON</strong> to load a participant's exported file.</p>
+  </div>
+
+  <!-- Main content (hidden until session loaded) -->
+  <div id="main-content" class="main-content" style="display:none">
+
+    <!-- Session info bar -->
+    <div class="info-bar">
+      <div class="info-item"><span class="info-label">Participant</span><span id="info-participant" class="info-value">—</span></div>
+      <div class="info-item"><span class="info-label">Session</span><span id="info-session" class="info-value">—</span></div>
+      <div class="info-item"><span class="info-label">Duration</span><span id="info-duration" class="info-value">—</span></div>
+      <div class="info-item"><span class="info-label">Gaze points</span><span id="info-points" class="info-value">—</span></div>
+      <div class="info-item"><span class="info-label">Screenshots</span><span id="info-shots" class="info-value">—</span></div>
+    </div>
+
+    <div class="workspace">
+      <!-- Screenshot gallery (left panel) -->
+      <div class="gallery-panel">
+        <div class="panel-title">Screenshots</div>
+        <div id="gallery" class="gallery"></div>
+      </div>
+
+      <!-- Heatmap viewer (right panel) -->
+      <div class="viewer-panel">
+        <div class="viewer-toolbar">
+          <span class="panel-title" id="viewer-title">Select a screenshot</span>
+          <div class="viewer-controls">
+            <label class="toggle-label">
+              <input id="toggle-heatmap" type="checkbox" checked />
+              Heatmap
+            </label>
+            <label class="toggle-label">
+              <input id="toggle-dots" type="checkbox" />
+              Gaze dots
+            </label>
+          </div>
+        </div>
+        <div class="viewer-area" id="viewer-area">
+          <div class="viewer-placeholder">← Select a screenshot from the gallery</div>
+        </div>
+        <div class="viewer-footer" id="viewer-footer"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

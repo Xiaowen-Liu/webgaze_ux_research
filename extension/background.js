@@ -3,21 +3,18 @@
  *
  * Architecture (content-script approach):
  *   popup.js  →  background.js  →  content.js (WebGazer lives here)
- *                     ↕
- *               chrome.scripting injects webgazer.js into the active tab,
- *               then sends START_WEBGAZER. Content script runs webgazer.begin()
- *               which triggers a visible camera prompt in the real tab —
- *               this works because content scripts share the tab's browsing context.
  *
  * Message API:
- *   START_SESSION   { aois? }          → starts session, injects WebGazer  (from popup)
- *   STOP_SESSION    {}                  → tears down session  (from popup)
- *   RECALIBRATE     {}                  → reset to calibration phase  (from popup)
- *   CAL_DONE        {}                  → advances phase to tracking  (from content)
- *   GAZE_POINT      { x, y, ts, url }  → records point  (from content)
- *   GET_STATE       {}                  → state snapshot  (from popup / content)
- *   EXPORT          {}                  → full session JSON  (from popup)
- *   RESET           {}                  → clears everything  (from popup)
+ *   START_SESSION        { participantId?, aois? }  → starts session  (from popup)
+ *   STOP_SESSION         {}                          → tears down session  (from popup)
+ *   RECALIBRATE          {}                          → reset to calibration phase  (from popup)
+ *   CAL_DONE             {}                          → advances phase to tracking  (from content)
+ *   GAZE_POINT           { x, y, ts, url }           → records point  (from content)
+ *   TRIGGER_SCREENSHOT   { reason }                  → captures viewport  (from content)
+ *   GET_STATE            {}                          → state snapshot  (from popup / content)
+ *   EXPORT               {}                          → full session JSON  (from popup)
+ *   OPEN_DASHBOARD       {}                          → opens dashboard tab  (from popup)
+ *   RESET                {}                          → clears everything  (from popup)
  */
 
 // ---------------------------------------------------------------------------
@@ -25,17 +22,18 @@
 // ---------------------------------------------------------------------------
 
 const DEFAULT_STATE = {
-  phase: 'idle',          // 'idle' | 'calibrating' | 'tracking'
+  phase: 'idle',            // 'idle' | 'calibrating' | 'tracking'
   sessionId: null,
+  participantId: null,
   startedAt: null,
-  gazePoints: [],         // [{ x, y, ts, url }]
-  dwellTimes: {},         // { url: { aoi_label: ms } }
-  aois: [],               // [{ label, x, y, w, h }]
-  calibrationPoints: 0,
+  activeTabId: null,        // persisted so SW restart doesn't lose the tab
+  gazePoints: [],           // [{ x, y, ts, url }]  — sampled at ~10fps
+  screenshots: [],          // [{ id, capturedAt, url, reason, viewportW, viewportH, dataUrl }]
+  dwellTimes: {},           // { url: { aoi_label: ms } }
+  aois: [],                 // [{ label, x, y, w, h }]
 };
 
 let state = { ...DEFAULT_STATE };
-let activeTabId = null;
 
 // ---------------------------------------------------------------------------
 // Storage helpers
@@ -45,6 +43,16 @@ async function persistState() {
   await chrome.storage.local.set({ webgazeState: state });
 }
 
+// Batch persist: write at most once every 5 seconds during tracking
+let persistTimer = null;
+function schedulePersist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistState();
+  }, 5000);
+}
+
 async function loadState() {
   const result = await chrome.storage.local.get('webgazeState');
   if (result.webgazeState) {
@@ -52,8 +60,49 @@ async function loadState() {
   }
 }
 
-// Boot: restore any saved state
 loadState();
+
+// ---------------------------------------------------------------------------
+// Screenshot capture
+// ---------------------------------------------------------------------------
+
+const SCREENSHOT_MIN_INTERVAL_MS = 500;
+let lastScreenshotAt = 0;
+
+async function captureScreenshot(reason = 'manual') {
+  if (state.phase !== 'tracking' || !state.activeTabId) return;
+  const now = Date.now();
+  if (now - lastScreenshotAt < SCREENSHOT_MIN_INTERVAL_MS) return;
+  lastScreenshotAt = now;
+
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 60 });
+    const tab = await chrome.tabs.get(state.activeTabId);
+
+    // Ask content script for current viewport size
+    let viewportW = 0, viewportH = 0;
+    try {
+      const dims = await chrome.tabs.sendMessage(state.activeTabId, { type: 'GET_STATE' });
+      // viewport dims come separately via GET_VIEWPORT; use tab width as fallback
+      viewportW = tab.width  || 0;
+      viewportH = tab.height || 0;
+    } catch (_) {}
+
+    state.screenshots.push({
+      id: `shot_${now}`,
+      capturedAt: now,
+      url: tab.url || '',
+      reason,
+      viewportW,
+      viewportH,
+      dataUrl,
+    });
+
+    schedulePersist();
+  } catch (e) {
+    console.warn('[background] captureVisibleTab failed:', e.message);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Dwell time tracking
@@ -61,14 +110,13 @@ loadState();
 
 function updateDwellTimes(gazePoint) {
   const { x, y, url } = gazePoint;
-  if (!state.dwellTimes[url]) {
-    state.dwellTimes[url] = {};
-  }
+  if (!state.dwellTimes[url]) state.dwellTimes[url] = {};
   const urlDwells = state.dwellTimes[url];
   for (const aoi of state.aois) {
     if (x >= aoi.x && x <= aoi.x + aoi.w && y >= aoi.y && y <= aoi.y + aoi.h) {
       const label = aoi.label || `aoi_${aoi.x}_${aoi.y}`;
-      urlDwells[label] = (urlDwells[label] || 0) + 33; // ~30 fps → ~33ms per point
+      // ~10fps → each stored point represents ~100ms
+      urlDwells[label] = (urlDwells[label] || 0) + 100;
     }
   }
 }
@@ -85,14 +133,19 @@ function buildExport() {
     pageSummaries[url] = { gazePointCount: points.length, dwellTimes: dwells };
   }
   return {
+    // Schema version — makes future backend migration easier
+    schemaVersion: '1.0',
     sessionId: state.sessionId,
+    participantId: state.participantId || 'anonymous',
     startedAt: state.startedAt,
     exportedAt: Date.now(),
     durationMs: duration,
     totalGazePoints: state.gazePoints.length,
+    screenshotCount: state.screenshots.length,
     aois: state.aois,
     pageSummaries,
     gazePoints: state.gazePoints,
+    screenshots: state.screenshots,
   };
 }
 
@@ -122,9 +175,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         const tab = await getActiveTab();
-        activeTabId = tab ? tab.id : null;
+        const tabId = tab ? tab.id : null;
 
-        if (!activeTabId) {
+        if (!tabId) {
           sendResponse({ ok: false, error: 'No active tab found' });
           return;
         }
@@ -133,74 +186,71 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ...DEFAULT_STATE,
           phase: 'calibrating',
           sessionId: `session_${Date.now()}`,
+          participantId: (payload && payload.participantId) || 'anonymous',
           startedAt: Date.now(),
+          activeTabId: tabId,
           aois: (payload && payload.aois) || [],
           gazePoints: [],
+          screenshots: [],
           dwellTimes: {},
-          calibrationPoints: 0,
         };
         await persistState();
 
-        // Respond to popup immediately
         sendResponse({ ok: true, state });
 
-        // Inject WebGazer into the active tab then kick off calibration.
-        // webgazer.begin() inside the content script triggers the camera
-        // permission prompt in the visible tab — this works reliably.
         try {
           await chrome.scripting.executeScript({
-            target: { tabId: activeTabId },
+            target: { tabId: state.activeTabId },
             files: ['lib/webgazer.js'],
           });
-          console.log('[background] webgazer.js injected into tab', activeTabId);
         } catch (err) {
           console.error('[background] Failed to inject webgazer.js:', err);
           state = { ...DEFAULT_STATE };
           persistState();
-          sendResponse({ ok: false, error: 'Script injection failed: ' + err.message });
           return;
         }
 
-        // Tell content script to start WebGazer (camera + calibration)
-        chrome.tabs.sendMessage(activeTabId, { type: 'START_WEBGAZER' }).catch(err => {
+        chrome.tabs.sendMessage(state.activeTabId, { type: 'START_WEBGAZER' }).catch(err => {
           console.error('[background] START_WEBGAZER failed:', err);
         });
       })();
-      return true; // async
+      return true;
     }
 
     case 'CAL_DONE': {
-      // Calibration sequence complete; content script transitions to tracking
       state.phase = 'tracking';
       state.startedAt = Date.now();
       persistState();
-      // Tell content to start rendering the gaze dot + heatmap
-      if (activeTabId !== null) {
-        chrome.tabs.sendMessage(activeTabId, { type: 'CALIBRATION_COMPLETE' }).catch(() => {});
+      if (state.activeTabId !== null) {
+        chrome.tabs.sendMessage(state.activeTabId, { type: 'CALIBRATION_COMPLETE' }).catch(() => {});
       }
+      // Capture initial screenshot when tracking starts
+      captureScreenshot('session_start');
       sendResponse({ ok: true, state });
       break;
     }
 
     case 'GAZE_POINT': {
-      // From content script: a WebGazer prediction arrived
       if (state.phase !== 'tracking') {
         sendResponse({ ok: false });
         break;
       }
       const point = {
-        x: payload.x,
-        y: payload.y,
+        x: Math.round(payload.x),
+        y: Math.round(payload.y),
         ts: payload.ts || Date.now(),
         url: payload.url || '',
       };
       state.gazePoints.push(point);
       updateDwellTimes(point);
+      schedulePersist();
+      sendResponse({ ok: true });
+      break;
+    }
 
-      // Throttle storage writes
-      if (state.gazePoints.length % 50 === 0) {
-        persistState();
-      }
+    case 'TRIGGER_SCREENSHOT': {
+      const reason = (payload && payload.reason) || 'manual';
+      captureScreenshot(reason).catch(() => {});
       sendResponse({ ok: true });
       break;
     }
@@ -211,11 +261,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       }
       state.phase = 'calibrating';
-      state.calibrationPoints = 0;
       persistState();
-      // Tell WebGazer in content script to clear its data and re-show calibration
-      if (activeTabId !== null) {
-        chrome.tabs.sendMessage(activeTabId, { type: 'RECALIBRATE_WEBGAZER' }).catch(() => {});
+      if (state.activeTabId !== null) {
+        chrome.tabs.sendMessage(state.activeTabId, { type: 'RECALIBRATE_WEBGAZER' }).catch(() => {});
       }
       sendResponse({ ok: true, state });
       break;
@@ -228,16 +276,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         state.phase = 'idle';
+        if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
         await persistState();
 
-        if (activeTabId !== null) {
-          chrome.tabs.sendMessage(activeTabId, { type: 'STOP_SESSION' }).catch(() => {});
+        if (state.activeTabId !== null) {
+          chrome.tabs.sendMessage(state.activeTabId, { type: 'STOP_SESSION' }).catch(() => {});
         }
-        activeTabId = null;
+        state.activeTabId = null;
 
         sendResponse({ ok: true });
       })();
-      return true; // async
+      return true;
     }
 
     case 'GET_STATE': {
@@ -246,12 +295,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     case 'EXPORT': {
-      const exportData = buildExport();
-      sendResponse({ ok: true, data: exportData });
+      sendResponse({ ok: true, data: buildExport() });
+      break;
+    }
+
+    case 'OPEN_DASHBOARD': {
+      const url = chrome.runtime.getURL('dashboard/dashboard.html');
+      chrome.tabs.create({ url }).catch(() => {});
+      sendResponse({ ok: true });
       break;
     }
 
     case 'RESET': {
+      if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
       state = { ...DEFAULT_STATE };
       chrome.storage.local.remove('webgazeState');
       sendResponse({ ok: true });
@@ -266,14 +322,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // ---------------------------------------------------------------------------
-// Tab navigation: tag gaze points with the correct URL on SPA navigation
+// Tab navigation — capture screenshot + tag gaze URL on page change
 // ---------------------------------------------------------------------------
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && state.phase === 'tracking' && tabId === activeTabId) {
+  if (tabId !== state.activeTabId || state.phase !== 'tracking') return;
+  if (changeInfo.status === 'complete') {
     chrome.tabs.sendMessage(tabId, {
       type: 'TAB_NAVIGATED',
       payload: { url: tab.url },
     }).catch(() => {});
+    captureScreenshot('url_change');
   }
 });

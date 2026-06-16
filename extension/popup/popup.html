@@ -36,6 +36,12 @@
       </div>
     </div>
 
+    <!-- Participant ID (shown when idle) -->
+    <div id="participant-row" class="participant-row">
+      <label for="participant-id">Participant</label>
+      <input id="participant-id" type="text" placeholder="e.g. P01 or Alice" maxlength="40" />
+    </div>
+
     <!-- Action buttons -->
     <div class="actions">
       <button id="btn-start" class="btn btn-primary">Start Session</button>
@@ -57,7 +63,8 @@
     <div id="export-section" class="section" style="display:none">
       <h3>Last Session</h3>
       <div id="export-summary" class="export-summary"></div>
-      <button id="btn-download" class="btn btn-primary btn-full">Download JSON</button>
+      <button id="btn-dashboard" class="btn btn-primary btn-full">Open Dashboard</button>
+      <button id="btn-download" class="btn btn-secondary btn-full" style="margin-top:6px">Download JSON</button>
     </div>
   </main>
 

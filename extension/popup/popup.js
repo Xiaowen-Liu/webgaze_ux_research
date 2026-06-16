@@ -19,9 +19,13 @@ const stats        = document.getElementById('stats');
 const statPoints   = document.getElementById('stat-points');
 const statPages    = document.getElementById('stat-pages');
 
+const participantRow = document.getElementById('participant-row');
+const participantInput = document.getElementById('participant-id');
+
 const btnStart     = document.getElementById('btn-start');
 const btnRecal     = document.getElementById('btn-recal');
 const btnStop      = document.getElementById('btn-stop');
+const btnDashboard = document.getElementById('btn-dashboard');
 
 const aoiList      = document.getElementById('aoi-list');
 const btnAddAoi    = document.getElementById('btn-add-aoi');
@@ -86,6 +90,7 @@ function setPhaseUI(phase, state) {
       btnStop.style.display  = 'none';
       stats.style.display    = 'none';
       sessionTime.style.display = 'none';
+      participantRow.style.display = '';
       stopClock();
       break;
 
@@ -96,6 +101,7 @@ function setPhaseUI(phase, state) {
       btnStop.style.display  = '';
       stats.style.display    = 'none';
       sessionTime.style.display = 'none';
+      participantRow.style.display = 'none';
       break;
 
     case 'tracking':
@@ -103,6 +109,7 @@ function setPhaseUI(phase, state) {
       btnStart.style.display = 'none';
       btnRecal.style.display = '';
       btnStop.style.display  = '';
+      participantRow.style.display = 'none';
       stats.style.display    = '';
       sessionTime.style.display = '';
       if (state && state.startedAt && !clockTimer) {
@@ -214,7 +221,8 @@ btnStart.addEventListener('click', async () => {
   // background.js will open a full tab to request camera permission
   // (popup closes on blur so getUserMedia prompts are dismissed immediately),
   // then create the offscreen doc and show calibration on the active tab.
-  const resp = await send('START_SESSION', { aois });
+  const participantId = participantInput.value.trim() || 'anonymous';
+  const resp = await send('START_SESSION', { aois, participantId });
   if (!resp || !resp.ok) {
     alert('Failed to start session: ' + (resp && resp.error));
     btnStart.disabled = false;
@@ -284,12 +292,17 @@ function showExportSummary(data) {
   const pages = Object.keys(data.pageSummaries || {}).length;
   const dur   = formatDuration(data.durationMs || 0);
   exportSummary.innerHTML = `
-    <div>Session: <strong>${data.sessionId || '—'}</strong></div>
+    <div>Participant: <strong>${data.participantId || '—'}</strong></div>
     <div>Duration: <strong>${dur}</strong></div>
     <div>Gaze points: <strong>${data.totalGazePoints || 0}</strong></div>
+    <div>Screenshots: <strong>${data.screenshotCount || 0}</strong></div>
     <div>Pages tracked: <strong>${pages}</strong></div>
   `;
 }
+
+btnDashboard.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD' });
+});
 
 // ---------------------------------------------------------------------------
 // Init

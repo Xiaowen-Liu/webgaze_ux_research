@@ -280,3 +280,33 @@ footer {
   font-variant-numeric: tabular-nums;
   user-select: text;
 }
+
+/* ── Participant row ── */
+
+.participant-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.participant-row label {
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.participant-row input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  padding: 5px 10px;
+  outline: none;
+}
+
+.participant-row input:focus {
+  border-color: var(--accent);
+}
