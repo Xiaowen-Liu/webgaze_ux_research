@@ -79,18 +79,6 @@
   white-space: nowrap;
 }
 
-#webgaze-cal-progress {
-  position: absolute;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: #a0b0c0;
-  font-family: system-ui, -apple-system, sans-serif;
-  font-size: 14px;
-  text-align: center;
-  white-space: nowrap;
-}
-
 /* ── Calibration dot ──────────────────────────────────────────────────────── */
 
 .webgaze-cal-dot {
@@ -132,4 +120,147 @@
 .webgaze-cal-dot.done .webgaze-cal-ring {
   background: radial-gradient(circle, #5f5 at 0%, #080 at 60%);
   box-shadow: 0 0 0 3px rgba(80, 255, 80, 0.3), 0 0 16px rgba(80, 255, 80, 0.4);
+}
+
+/* ── Accuracy check — center dot ─────────────────────────────────────────── */
+
+.webgaze-acc-center-dot {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.3), 0 0 20px rgba(245, 158, 11, 0.5);
+  animation: webgaze-pulse 1s ease-in-out infinite;
+}
+
+@keyframes webgaze-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(245,158,11,0.3), 0 0 20px rgba(245,158,11,0.5); }
+  50%       { box-shadow: 0 0 0 8px rgba(245,158,11,0.15), 0 0 30px rgba(245,158,11,0.3); }
+}
+
+/* ── Accuracy check — instruction modal ──────────────────────────────────── */
+
+#webgaze-acc-modal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(15, 20, 35, 0.97);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 20px;
+  padding: 36px 44px;
+  text-align: center;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #e2e8f0;
+  max-width: 380px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+
+.acc-modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.acc-modal-body {
+  font-size: 14px;
+  color: #cbd5e1;
+  line-height: 1.7;
+  margin-bottom: 24px;
+}
+
+#webgaze-acc-start {
+  background: #4f46e5;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#webgaze-acc-start:hover { opacity: 0.85; }
+
+/* ── Accuracy result panel ────────────────────────────────────────────────── */
+
+#webgaze-acc-result {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(15, 20, 35, 0.97);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 20px;
+  padding: 40px 48px;
+  text-align: center;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #e2e8f0;
+  min-width: 320px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+
+#webgaze-acc-result .acc-score {
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+#webgaze-acc-result .acc-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 16px;
+}
+
+#webgaze-acc-result .acc-detail {
+  font-size: 14px;
+  color: #cbd5e1;
+  margin-bottom: 8px;
+}
+
+#webgaze-acc-result .acc-hint {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 28px;
+  line-height: 1.5;
+}
+
+.acc-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.acc-buttons button {
+  padding: 10px 22px;
+  border-radius: 10px;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.acc-buttons button:hover { opacity: 0.85; }
+
+#webgaze-acc-recal {
+  background: rgba(255,255,255,0.08);
+  color: #cbd5e1;
+}
+
+#webgaze-acc-continue {
+  background: #4f46e5;
+  color: white;
+}
+
+#webgaze-acc-continue.warn {
+  background: #dc2626;
 }

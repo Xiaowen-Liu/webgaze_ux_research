@@ -175,6 +175,143 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Accuracy check — mirrors the official WebGazer calibration.html flow
+  //
+  // Algorithm (from precision_calculation.js):
+  //   1. Tell user to stare at CENTER dot for 5 s (no clicking)
+  //   2. webgazer.params.storingPoints = true  → WebGazer fills its 50-point ring buffer
+  //   3. After 5 s: webgazer.getStoredPoints() → [x50, y50]
+  //   4. For each of 50 points: precision = 100 - (distance_from_center / halfWindowHeight * 100)
+  //   5. Average of 50 values = final accuracy %
+  // ---------------------------------------------------------------------------
+
+  const ACCURACY_SAMPLE_MS = 5000; // 5 s — matches official demo
+
+  /** Calculates precision % using the official WebGazer formula. */
+  function calculatePrecision(past50) {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const cx = W / 2;
+    const cy = H / 2;
+    const halfH = H / 2;
+
+    const x50 = past50[0];
+    const y50 = past50[1];
+    const n = Math.min(x50.length, y50.length);
+    if (n === 0) return 0;
+
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+      const dx = cx - x50[i];
+      const dy = cy - y50[i];
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const p = dist <= halfH ? Math.max(0, 100 - (dist / halfH * 100)) : 0;
+      total += p;
+    }
+    return Math.round(total / n);
+  }
+
+  /**
+   * Phase 1: show center dot + instruction modal, collect 5 s of gaze.
+   * Resolves with { accuracy (0-100) }.
+   */
+  function runAccuracyCheck() {
+    return new Promise((resolve) => {
+      // Step 1 — instruction overlay
+      document.body.appendChild(calOverlay);
+      calOverlay.innerHTML = '';
+      calOverlay.classList.add('active');
+
+      calOverlay.innerHTML = `
+        <div id="webgaze-acc-modal">
+          <div class="acc-modal-title">Accuracy Check</div>
+          <div class="acc-modal-body">
+            Please stare at the <strong>dot in the center</strong> of the screen
+            for <strong>5 seconds</strong> without moving your mouse.<br><br>
+            This measures how accurate your eye tracking is.
+          </div>
+          <button id="webgaze-acc-start">OK — Start</button>
+        </div>
+      `;
+
+      calOverlay.querySelector('#webgaze-acc-start').addEventListener('click', () => {
+        // Step 2 — show center dot + countdown
+        calOverlay.innerHTML = '';
+
+        const centerDot = document.createElement('div');
+        centerDot.className = 'webgaze-acc-center-dot';
+        calOverlay.appendChild(centerDot);
+
+        // Start storing gaze points in WebGazer's internal 50-point buffer
+        if (window.webgazer) window.webgazer.params.storingPoints = true;
+
+        const startTime = Date.now();
+        const tick = setInterval(() => {
+          const elapsed = Date.now() - startTime;
+
+          if (elapsed >= ACCURACY_SAMPLE_MS) {
+            clearInterval(tick);
+
+            // Stop storing and read results
+            if (window.webgazer) window.webgazer.params.storingPoints = false;
+            const past50 = window.webgazer ? window.webgazer.getStoredPoints() : [[], []];
+            const accuracy = calculatePrecision(past50);
+
+            calOverlay.classList.remove('active');
+            calOverlay.remove();
+            resolve({ accuracy });
+          }
+        }, 200);
+      });
+    });
+  }
+
+  /**
+   * Phase 2: display result + Recalibrate / Continue buttons.
+   * Resolves true = continue, false = recalibrate.
+   */
+  function showAccuracyResult(accuracy) {
+    return new Promise((resolve) => {
+      document.body.appendChild(calOverlay);
+      calOverlay.innerHTML = '';
+      calOverlay.classList.add('active');
+
+      const isGood  = accuracy >= 60;
+      const color   = accuracy >= 80 ? '#4ade80' : accuracy >= 60 ? '#facc15' : '#f87171';
+
+      calOverlay.innerHTML = `
+        <div id="webgaze-acc-result">
+          <div class="acc-score" style="color:${color}">${accuracy}%</div>
+          <div class="acc-label">Your accuracy measure is ${accuracy}%</div>
+          <div class="acc-hint">${
+            accuracy >= 80 ? 'Excellent — tracking will be very accurate.' :
+            accuracy >= 60 ? 'Good — tracking is usable.' :
+            'Low accuracy. Better lighting and head position may help.'
+          }</div>
+          <div class="acc-buttons">
+            <button id="webgaze-acc-recal">Recalibrate</button>
+            <button id="webgaze-acc-continue" ${isGood ? '' : 'class="warn"'}>
+              ${isGood ? 'Confirm' : 'Continue Anyway'}
+            </button>
+          </div>
+        </div>
+      `;
+
+      calOverlay.querySelector('#webgaze-acc-continue').addEventListener('click', () => {
+        calOverlay.classList.remove('active');
+        calOverlay.remove();
+        resolve(true);
+      });
+
+      calOverlay.querySelector('#webgaze-acc-recal').addEventListener('click', () => {
+        calOverlay.classList.remove('active');
+        calOverlay.remove();
+        resolve(false);
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Calibration UI
   // ---------------------------------------------------------------------------
 
@@ -189,12 +326,8 @@
 
       const instructions = document.createElement('div');
       instructions.id = 'webgaze-cal-instructions';
-      instructions.textContent = 'Calibration: look at each dot and click it ' + CAL_CLICKS_REQUIRED + ' times';
+      instructions.textContent = 'Click each dot ' + CAL_CLICKS_REQUIRED + ' times while looking at it';
       calOverlay.appendChild(instructions);
-
-      const progressEl = document.createElement('div');
-      progressEl.id = 'webgaze-cal-progress';
-      calOverlay.appendChild(progressEl);
 
       function showPoint(idx) {
         // Remove old dot
@@ -239,8 +372,6 @@
             window.webgazer.recordScreenPosition(px, py, 'click');
           }
 
-          progressEl.textContent = `Point ${idx + 1}/${CAL_POINTS.length} — ${CAL_CLICKS_REQUIRED - clickCount} clicks remaining`;
-
           if (clickCount >= CAL_CLICKS_REQUIRED) {
             calDot.classList.add('done');
             setTimeout(() => showPoint(idx + 1), 400);
@@ -248,7 +379,6 @@
         });
 
         calOverlay.appendChild(calDot);
-        progressEl.textContent = `Point ${idx + 1}/${CAL_POINTS.length} — click ${CAL_CLICKS_REQUIRED} times`;
       }
 
       showPoint(0);
@@ -367,6 +497,19 @@
       console.log('[WebGaze] webgazer.begin() resolved — showing calibration');
 
       await runCalibration();
+
+      // Accuracy check loop: let user retry calibration if accuracy is too low
+      let accepted = false;
+      while (!accepted) {
+        const { accuracy } = await runAccuracyCheck();
+        accepted = await showAccuracyResult(accuracy);
+        if (!accepted) {
+          // User chose to recalibrate — clear data and redo
+          try { window.webgazer.clearData(); } catch (e) {}
+          await runCalibration();
+        }
+      }
+
       chrome.runtime.sendMessage({ type: 'CAL_DONE' }).catch(() => {});
     } catch (err) {
       console.error('[WebGaze] startWebGazer error', err);

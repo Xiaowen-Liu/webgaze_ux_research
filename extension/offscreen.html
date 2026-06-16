@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<!--
+  offscreen.html — WebGaze Offscreen Document
+  Never shown to the user. Hosts WebGazer so it runs in the extension's CSP
+  context, free from page-level CSP restrictions (e.g. tfhub.dev blocks).
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>WebGaze Offscreen</title>
+  </head>
+  <body>
+    <!-- WebGazer needs a DOM to attach its video/canvas elements -->
+    <div id="webgazer-host" style="display:none;width:1px;height:1px;overflow:hidden;"></div>
+
+    <!-- Load WebGazer first so window.webgazer is available to offscreen.js -->
+    <script src="lib/webgazer.js"></script>
+    <script src="offscreen.js"></script>
+  </body>
+</html>
