@@ -211,23 +211,17 @@ btnStart.addEventListener('click', async () => {
   btnStart.disabled = true;
   btnStart.textContent = 'Starting…';
 
-  // First tell background to start session
+  // Tell background to start the session.
+  // background.js will: create the offscreen doc → wait for OFFSCREEN_READY
+  // → start WebGazer → send SHOW_CALIBRATION to the content tab.
+  // Do NOT also send START_SESSION to the content tab — content.js doesn't
+  // handle it and it triggers a spurious "Could not establish connection" error.
   const resp = await send('START_SESSION', { aois });
   if (!resp || !resp.ok) {
     alert('Failed to start session: ' + (resp && resp.error));
     btnStart.disabled = false;
     btnStart.textContent = 'Start Session';
     return;
-  }
-
-  // Then inject the start message into the active tab's content script
-  const tab = await getActiveTab();
-  if (tab) {
-    chrome.tabs.sendMessage(tab.id, { type: 'START_SESSION', payload: { aois } }, () => {
-      if (chrome.runtime.lastError) {
-        console.warn('[popup] content script not ready:', chrome.runtime.lastError.message);
-      }
-    });
   }
 
   setPhaseUI('calibrating', resp.state);
@@ -237,14 +231,12 @@ btnStart.addEventListener('click', async () => {
 });
 
 btnRecal.addEventListener('click', async () => {
-  const tab = await getActiveTab();
-  if (!tab) return;
-  // Send stop to current content (ends WebGazer) then restart calibration
-  chrome.tabs.sendMessage(tab.id, { type: 'STOP_SESSION' }, () => {});
-  setTimeout(() => {
-    chrome.tabs.sendMessage(tab.id, { type: 'START_SESSION', payload: { aois } }, () => {});
-  }, 500);
-  setPhaseUI('calibrating', null);
+  // Ask background to reset calibration; it will send SHOW_CALIBRATION
+  // to the content tab and clear WebGazer's training data in offscreen.
+  const resp = await send('RECALIBRATE', {});
+  if (resp && resp.ok) {
+    setPhaseUI('calibrating', null);
+  }
 });
 
 btnStop.addEventListener('click', async () => {
