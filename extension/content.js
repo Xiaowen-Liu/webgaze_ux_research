@@ -2,12 +2,12 @@
  * content.js — WebGaze content script
  *
  * Injected into every page. Responsibilities:
- *  - Create canvas overlay + gaze dot DOM elements
- *  - Load WebGazer from web-accessible resource
- *  - Listen for START_SESSION → run 9-point calibration, then stream gaze
- *  - EMA-smooth gaze coords (α=0.22), move dot, paint heatmap
- *  - Send GAZE_POINT messages to background
- *  - Listen for STOP_SESSION → teardown
+ *  - Receive START_WEBGAZER → initialize WebGazer (injected by background.js
+ *    via scripting.executeScript) → trigger camera prompt in visible tab
+ *  - Show 9-point calibration UI; call webgazer.recordScreenPosition() directly
+ *  - EMA-smooth gaze coords (α=0.22), move gaze dot, paint heatmap
+ *  - Forward GAZE_POINT to background for storage
+ *  - STOP_SESSION → teardown + webgazer.end()
  */
 
 (function () {
@@ -35,20 +35,16 @@
   // State
   // ---------------------------------------------------------------------------
 
-  let webgazerLoaded = false;
-  let webgazerReady = false;
   let phase = 'idle'; // 'idle' | 'calibrating' | 'tracking'
   let currentUrl = location.href;
+  let webgazerRunning = false;
 
-  // Gaze smoothing
+  // Gaze smoothing (EMA)
   let smoothX = null;
   let smoothY = null;
 
-  // Heatmap data: ImageData-style accumulation buffer
+  // Heatmap data: Float32 accumulation buffer
   let heatBuffer = null;
-
-  // AOI list from session state
-  let aois = [];
 
   // Animation frame handle
   let animFrameId = null;
@@ -137,8 +133,6 @@
       const v = heatBuffer[i] / max; // 0..1
       if (v < 0.01) continue;
 
-      const px = i % W;
-      const py = Math.floor(i / W);
       const idx = i * 4;
 
       // Hot→cold colour ramp: red→yellow→green→blue
@@ -181,25 +175,6 @@
   }
 
   // ---------------------------------------------------------------------------
-  // WebGazer loader
-  // ---------------------------------------------------------------------------
-
-  function loadWebGazer() {
-    return new Promise((resolve, reject) => {
-      if (webgazerLoaded) { resolve(); return; }
-
-      const script = document.createElement('script');
-      script.src = chrome.runtime.getURL('lib/webgazer.js');
-      script.onload = () => {
-        webgazerLoaded = true;
-        resolve();
-      };
-      script.onerror = () => reject(new Error('Failed to load webgazer.js'));
-      (document.head || document.documentElement).appendChild(script);
-    });
-  }
-
-  // ---------------------------------------------------------------------------
   // Calibration UI
   // ---------------------------------------------------------------------------
 
@@ -227,7 +202,7 @@
         if (old) old.remove();
 
         if (idx >= CAL_POINTS.length) {
-          // Done
+          // All calibration points done
           calOverlay.classList.remove('active');
           calOverlay.remove();
           resolve();
@@ -235,46 +210,44 @@
         }
 
         const p = CAL_POINTS[idx];
-        const dot = document.createElement('div');
-        dot.className = 'webgaze-cal-dot';
-        dot.style.left = (p.x * 100) + '%';
-        dot.style.top  = (p.y * 100) + '%';
+        const calDot = document.createElement('div');
+        calDot.className = 'webgaze-cal-dot';
+        calDot.style.left = (p.x * 100) + '%';
+        calDot.style.top  = (p.y * 100) + '%';
 
         const ring = document.createElement('div');
         ring.className = 'webgaze-cal-ring';
-        dot.appendChild(ring);
+        calDot.appendChild(ring);
 
         const counter = document.createElement('span');
         counter.className = 'webgaze-cal-counter';
         counter.textContent = CAL_CLICKS_REQUIRED;
-        dot.appendChild(counter);
+        calDot.appendChild(counter);
 
         clickCount = 0;
 
-        dot.addEventListener('click', () => {
+        calDot.addEventListener('click', () => {
           clickCount++;
           counter.textContent = CAL_CLICKS_REQUIRED - clickCount;
-          dot.classList.add('clicked');
-          setTimeout(() => dot.classList.remove('clicked'), 150);
+          calDot.classList.add('clicked');
+          setTimeout(() => calDot.classList.remove('clicked'), 150);
 
-          // Feed click to WebGazer as a calibration sample
+          // Record calibration point directly in WebGazer
+          const px = p.x * window.innerWidth;
+          const py = p.y * window.innerHeight;
           if (window.webgazer) {
-            window.webgazer.recordScreenPosition(
-              p.x * window.innerWidth,
-              p.y * window.innerHeight,
-              'click'
-            );
+            window.webgazer.recordScreenPosition(px, py, 'click');
           }
 
           progressEl.textContent = `Point ${idx + 1}/${CAL_POINTS.length} — ${CAL_CLICKS_REQUIRED - clickCount} clicks remaining`;
 
           if (clickCount >= CAL_CLICKS_REQUIRED) {
-            dot.classList.add('done');
+            calDot.classList.add('done');
             setTimeout(() => showPoint(idx + 1), 400);
           }
         });
 
-        calOverlay.appendChild(dot);
+        calOverlay.appendChild(calDot);
         progressEl.textContent = `Point ${idx + 1}/${CAL_POINTS.length} — click ${CAL_CLICKS_REQUIRED} times`;
       }
 
@@ -283,51 +256,10 @@
   }
 
   // ---------------------------------------------------------------------------
-  // WebGazer initialisation & gaze listener
-  // ---------------------------------------------------------------------------
-
-  async function startGaze(aoiList) {
-    aois = aoiList || [];
-
-    await loadWebGazer();
-
-    // Configure WebGazer
-    window.webgazer
-      .setRegression('ridge')
-      .setTracker('TFFaceMesh')
-      .setGazeListener((data) => {
-        if (!data || phase !== 'tracking') return;
-
-        // EMA smoothing
-        if (smoothX === null) { smoothX = data.x; smoothY = data.y; }
-        smoothX = EMA_ALPHA * data.x + (1 - EMA_ALPHA) * smoothX;
-        smoothY = EMA_ALPHA * data.y + (1 - EMA_ALPHA) * smoothY;
-
-        // Move gaze dot
-        dot.style.transform = `translate(${smoothX - 8}px, ${smoothY - 8}px)`;
-        dot.style.display = 'block';
-
-        // Paint heatmap
-        addHeatPoint(smoothX, smoothY);
-
-        // Send to background
-        chrome.runtime.sendMessage({
-          type: 'GAZE_POINT',
-          payload: { x: Math.round(smoothX), y: Math.round(smoothY), ts: Date.now(), url: currentUrl },
-        }).catch(() => {});
-      })
-      .showPredictionPoints(false)  // We draw our own dot
-      .showVideoPreview(true)
-      .begin();
-
-    webgazerReady = true;
-  }
-
-  // ---------------------------------------------------------------------------
   // Session lifecycle
   // ---------------------------------------------------------------------------
 
-  async function startSession(payload) {
+  async function showCalibration() {
     if (phase !== 'idle') return;
 
     mountOverlay();
@@ -335,39 +267,50 @@
     phase = 'calibrating';
 
     try {
-      await startGaze(payload && payload.aois);
-
-      // Show calibration overlay
       await runCalibration();
-
-      phase = 'tracking';
-
-      // Tell background calibration is done
-      await chrome.runtime.sendMessage({ type: 'CALIBRATION_DONE' });
-
-      // Show dot + start animation
-      dot.style.display = 'block';
-      animFrameId = requestAnimationFrame(animLoop);
-
+      // Notify background that calibration sequence is complete
+      await chrome.runtime.sendMessage({ type: 'CAL_DONE' });
     } catch (err) {
-      console.error('[WebGaze] startSession error', err);
+      console.error('[WebGaze] showCalibration error', err);
       stopSession();
     }
+  }
+
+  function startTracking() {
+    phase = 'tracking';
+    dot.style.display = 'block';
+    animFrameId = requestAnimationFrame(animLoop);
+  }
+
+  function renderGaze(x, y) {
+    if (phase !== 'tracking') return;
+
+    // EMA smoothing
+    if (smoothX === null) { smoothX = x; smoothY = y; }
+    smoothX = EMA_ALPHA * x + (1 - EMA_ALPHA) * smoothX;
+    smoothY = EMA_ALPHA * y + (1 - EMA_ALPHA) * smoothY;
+
+    // Move gaze dot
+    dot.style.transform = `translate(${smoothX - 8}px, ${smoothY - 8}px)`;
+    dot.style.display = 'block';
+
+    // Paint heatmap
+    addHeatPoint(smoothX, smoothY);
   }
 
   function stopSession() {
     phase = 'idle';
 
+    // Stop WebGazer camera/model
+    if (webgazerRunning && window.webgazer) {
+      try { window.webgazer.end(); } catch (e) {}
+      webgazerRunning = false;
+    }
+
     // Stop animation loop
     if (animFrameId) {
       cancelAnimationFrame(animFrameId);
       animFrameId = null;
-    }
-
-    // Teardown WebGazer
-    if (window.webgazer && webgazerReady) {
-      try { window.webgazer.end(); } catch (_) {}
-      webgazerReady = false;
     }
 
     // Remove DOM elements
@@ -385,6 +328,53 @@
   }
 
   // ---------------------------------------------------------------------------
+  // WebGazer initialization (called after webgazer.js is injected by background)
+  // ---------------------------------------------------------------------------
+
+  async function startWebGazer() {
+    if (webgazerRunning) return;
+    if (!window.webgazer) {
+      console.error('[WebGaze] window.webgazer not found — was webgazer.js injected?');
+      return;
+    }
+
+    mountOverlay();
+    resizeCanvas();
+    phase = 'calibrating';
+
+    try {
+      window.webgazer
+        .setRegression('ridge')
+        .setTracker('TFFacemesh')
+        .showPredictionPoints(false)
+        .showVideoPreview(true)
+        .setGazeListener((data, ts) => {
+          if (!data) return;
+          const { x, y } = data;
+          // Render locally
+          renderGaze(x, y);
+          // Send to background for storage
+          if (phase === 'tracking') {
+            chrome.runtime.sendMessage({
+              type: 'GAZE_POINT',
+              payload: { x, y, ts: ts || Date.now(), url: location.href },
+            }).catch(() => {});
+          }
+        });
+
+      await window.webgazer.begin();
+      webgazerRunning = true;
+      console.log('[WebGaze] webgazer.begin() resolved — showing calibration');
+
+      await runCalibration();
+      chrome.runtime.sendMessage({ type: 'CAL_DONE' }).catch(() => {});
+    } catch (err) {
+      console.error('[WebGaze] startWebGazer error', err);
+      stopSession();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Message listener
   // ---------------------------------------------------------------------------
 
@@ -392,9 +382,41 @@
     const { type, payload } = message;
 
     switch (type) {
-      case 'START_SESSION':
-        startSession(payload).then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
+      case 'START_WEBGAZER':
+        startWebGazer()
+          .then(() => sendResponse({ ok: true }))
+          .catch((e) => sendResponse({ ok: false, error: String(e) }));
         return true;
+
+      case 'SHOW_CALIBRATION':
+        showCalibration()
+          .then(() => sendResponse({ ok: true }))
+          .catch((e) => sendResponse({ ok: false, error: String(e) }));
+        return true;
+
+      case 'RECALIBRATE_WEBGAZER':
+        // Clear WebGazer training data and re-run calibration
+        if (window.webgazer) {
+          try { window.webgazer.clearData(); } catch (e) {}
+        }
+        phase = 'calibrating';
+        runCalibration().then(() => {
+          chrome.runtime.sendMessage({ type: 'CAL_DONE' }).catch(() => {});
+        }).catch(() => {});
+        sendResponse({ ok: true });
+        break;
+
+      case 'CALIBRATION_COMPLETE':
+        startTracking();
+        sendResponse({ ok: true });
+        break;
+
+      case 'RENDER_GAZE':
+        if (payload && typeof payload.x === 'number' && typeof payload.y === 'number') {
+          renderGaze(payload.x, payload.y);
+        }
+        sendResponse({ ok: true });
+        break;
 
       case 'STOP_SESSION':
         stopSession();
@@ -411,7 +433,7 @@
         break;
 
       default:
-        // Ignore unknown messages
+        // Ignore unknown messages silently
         break;
     }
   });
@@ -426,12 +448,11 @@
     if (response && response.ok && response.state) {
       const bgPhase = response.state.phase;
       if (bgPhase === 'tracking') {
-        // Re-mount overlay and resume heatmap rendering but don't restart WebGazer
-        // (WebGazer is page-scoped; user needs to recalibrate on navigation)
+        // Re-mount overlay and resume heatmap rendering on page navigation
         mountOverlay();
         resizeCanvas();
         phase = 'tracking';
-        dot.style.display = 'none'; // WebGazer not running yet on this page
+        dot.style.display = 'none'; // will show once first RENDER_GAZE arrives
         animFrameId = requestAnimationFrame(animLoop);
       }
     }
