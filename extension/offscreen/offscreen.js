@@ -32,7 +32,7 @@ async function startWebGazer() {
 
   window.webgazer
     .setRegression('ridge')
-    .setTracker('TFFaceMesh')
+    .setTracker('TFFacemesh')
     .showPredictionPoints(false)
     .showVideoPreview(false)
     .setGazeListener((data, ts) => {

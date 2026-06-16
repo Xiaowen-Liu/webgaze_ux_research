@@ -211,11 +211,9 @@ btnStart.addEventListener('click', async () => {
   btnStart.disabled = true;
   btnStart.textContent = 'Starting…';
 
-  // Tell background to start the session.
-  // background.js will: create the offscreen doc → wait for OFFSCREEN_READY
-  // → start WebGazer → send SHOW_CALIBRATION to the content tab.
-  // Do NOT also send START_SESSION to the content tab — content.js doesn't
-  // handle it and it triggers a spurious "Could not establish connection" error.
+  // background.js will open a full tab to request camera permission
+  // (popup closes on blur so getUserMedia prompts are dismissed immediately),
+  // then create the offscreen doc and show calibration on the active tab.
   const resp = await send('START_SESSION', { aois });
   if (!resp || !resp.ok) {
     alert('Failed to start session: ' + (resp && resp.error));
