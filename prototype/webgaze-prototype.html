@@ -145,6 +145,9 @@
 
     /* Keep webgazer video small & unobtrusive */
     #webgazerVideoContainer { opacity: 0.55 !important; }
+    /* Prevent WebGazer's video/canvas elements from intercepting mouse clicks */
+    #webgazerVideoContainer,
+    #webgazerVideoContainer * { pointer-events: none !important; }
   </style>
 </head>
 <body>
@@ -405,7 +408,13 @@ function onCalDotClick(i, x, y) {
   if (i !== CAL.currentDot) { notify('Complete the highlighted dot first'); return; }
   if (dot.clicks >= CAL.CLICKS_NEEDED) return;
 
-  webgazer.recordScreenPosition(x, y, 'click');
+  // Wrap in try-catch: if webgazer isn't fully ready yet the error won't
+  // block the DOM updates that give visual feedback to the user.
+  try {
+    webgazer.recordScreenPosition(x, y, 'click');
+  } catch (e) {
+    console.warn('[webgaze] recordScreenPosition error (non-fatal):', e);
+  }
   dot.clicks++;
   dot.el.querySelector('.cal-dot-count').textContent = `${dot.clicks}/5`;
 
